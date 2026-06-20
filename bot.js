@@ -1,9 +1,13 @@
 require('dotenv').config();
 const { Bot, InlineKeyboard } = require('grammy');
+const fs = require('fs');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 const bot = new Bot(process.env.BOT_TOKEN);
 
-const VIP_USERS = new Set();
+const VIP_FILE = 'vip_users.json';
+function loadVip() { try { return new Set(JSON.parse(fs.readFileSync(VIP_FILE))); } catch { return new Set(); } }
+function saveVip(set) { fs.writeFileSync(VIP_FILE, JSON.stringify([...set])); }
+const VIP_USERS = loadVip();
 
 const mainMenu = new InlineKeyboard()
   .text('📊 Trending', 'trending').text('📈 Gainers', 'gainers').row()
@@ -24,7 +28,8 @@ function isVip(ctx) { return VIP_USERS.has(ctx.from.id); }
 bot.command('start', (ctx) => ctx.reply('👋 Welcome to Crypto_Ch4to_Bot!\n\nChoose an option:', { reply_markup: mainMenu }));
 bot.command('menu', (ctx) => ctx.reply('📲 Main Menu:', { reply_markup: mainMenu }));
 bot.command('ping', (ctx) => ctx.reply('🟢 Bot is online!'));
-bot.command('addvip', (ctx) => { const args = ctx.match.trim(); if (!args) return ctx.reply('Usage: /addvip <user_id>'); VIP_USERS.add(Number(args)); ctx.reply('✅ User ' + args + ' added to VIP!'); });
+bot.command('addvip', (ctx) => { const args = ctx.match.trim(); if (!args) return ctx.reply('Usage: /addvip <user_id>'); VIP_USERS.add(Number(args)); saveVip(VIP_USERS); ctx.reply('✅ User ' + args + ' added to VIP!'); });
+bot.command('removevip', (ctx) => { const args = ctx.match.trim(); if (!args) return ctx.reply('Usage: /removevip <user_id>'); VIP_USERS.delete(Number(args)); saveVip(VIP_USERS); ctx.reply('❌ User ' + args + ' removed from VIP.'); });
 bot.command('myvip', (ctx) => { if (isVip(ctx)) { ctx.reply('⭐ You have VIP access!', { reply_markup: vipMenu }); } else { ctx.reply('❌ Not VIP yet. Tap below to upgrade.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); } });
 bot.callbackQuery('menu', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('📲 Main Menu:', { reply_markup: mainMenu }); });
 bot.callbackQuery('support', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('🆘 Need help? Contact us directly:\n\n👤 @Ch4to8\n\nWe typically respond within a few hours.', { reply_markup: new InlineKeyboard().url('💬 Message Support', 'https://t.me/Ch4to8').row().text('⬅️ Menu', 'menu') }); });
@@ -49,3 +54,4 @@ bot.command('price', async (ctx) => { const symbol = ctx.match.trim().toLowerCas
 bot.command('stats', async (ctx) => { const symbol = ctx.match.trim().toLowerCase(); if (!symbol) return ctx.reply('Usage: /stats bitcoin'); const res = await fetch('https://api.coingecko.com/api/v3/coins/'+symbol); const data = await res.json(); if (!data.market_data) return ctx.reply('Coin not found. Try /stats bitcoin'); const m = data.market_data; ctx.reply('📊 '+data.name+':\n\nPrice: $'+m.current_price.usd.toLocaleString()+'\nMarket Cap: $'+m.market_cap.usd.toLocaleString()+'\n24h Change: '+m.price_change_percentage_24h.toFixed(2)+'%\nVolume: $'+m.total_volume.usd.toLocaleString(), { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.start();
 console.log('🤖 VIP Bot is running...');
+
