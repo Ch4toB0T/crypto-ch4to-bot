@@ -4,10 +4,32 @@ const fs = require('fs');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 const bot = new Bot(process.env.BOT_TOKEN);
 
+const LIFETIME_VIPS = new Set([8711651683]);
 const VIP_FILE = 'vip_users.json';
-function loadVip() { try { return new Set(JSON.parse(fs.readFileSync(VIP_FILE))); } catch { return new Set(); } }
-function saveVip(set) { fs.writeFileSync(VIP_FILE, JSON.stringify([...set])); }
-const VIP_USERS = loadVip();
+
+function loadVip() { try { return JSON.parse(fs.readFileSync(VIP_FILE)); } catch { return {}; } }
+function saveVip(obj) { fs.writeFileSync(VIP_FILE, JSON.stringify(obj)); }
+let VIP_USERS = loadVip();
+
+function isVip(ctx) {
+  const id = ctx.from.id;
+  if (LIFETIME_VIPS.has(id)) return true;
+  if (!VIP_USERS[id]) return false;
+  if (Date.now() > VIP_USERS[id].expires) { delete VIP_USERS[id]; saveVip(VIP_USERS); return false; }
+  return true;
+}
+
+function addVip(id) { VIP_USERS[id] = { expires: Date.now() + 30 * 24 * 60 * 60 * 1000 }; saveVip(VIP_USERS); }
+function removeVip(id) { delete VIP_USERS[id]; saveVip(VIP_USERS); }
+
+setInterval(async () => {
+  const now = Date.now();
+  for (const [id, data] of Object.entries(VIP_USERS)) {
+    const daysLeft = Math.floor((data.expires - now) / (1000 * 60 * 60 * 24));
+    if (daysLeft === 3) { try { await bot.api.sendMessage(Number(id), '⚠️ Your VIP access expires in 3 days!\n\nRenew now to keep access:\n\n₿ BTC:\nbc1q4lpvdz77uj70lg6ph03k05h9pk0c597f9a6f5j\n\n◎ SOL:\nAXdnDpaoHY57HjkYNcrV8fimZZN4e3KRdoBJ92B7vSdn\n\nContact @Ch4to8 after paying.'); } catch {} }
+    if (now > data.expires) { delete VIP_USERS[id]; saveVip(VIP_USERS); try { await bot.api.sendMessage(Number(id), '❌ Your VIP access has expired. Tap /vip to renew.'); } catch {} }
+  }
+}, 60 * 60 * 1000);
 
 const mainMenu = new InlineKeyboard()
   .text('📊 Trending', 'trending').text('📈 Gainers', 'gainers').row()
@@ -23,23 +45,21 @@ const vipMenu = new InlineKeyboard()
   .text('💎 Legit Memecoins', 'legit_memes').row()
   .text('📊 Main Menu', 'menu');
 
-function isVip(ctx) { return VIP_USERS.has(ctx.from.id); }
-
 bot.command('start', (ctx) => ctx.reply('👋 Welcome to Crypto_Ch4to_Bot!\n\nChoose an option:', { reply_markup: mainMenu }));
 bot.command('menu', (ctx) => ctx.reply('📲 Main Menu:', { reply_markup: mainMenu }));
 bot.command('ping', (ctx) => ctx.reply('🟢 Bot is online!'));
-bot.command('addvip', (ctx) => { const args = ctx.match.trim(); if (!args) return ctx.reply('Usage: /addvip <user_id>'); VIP_USERS.add(Number(args)); saveVip(VIP_USERS); ctx.reply('✅ User ' + args + ' added to VIP!'); });
-bot.command('removevip', (ctx) => { const args = ctx.match.trim(); if (!args) return ctx.reply('Usage: /removevip <user_id>'); VIP_USERS.delete(Number(args)); saveVip(VIP_USERS); ctx.reply('❌ User ' + args + ' removed from VIP.'); });
-bot.command('myvip', (ctx) => { if (isVip(ctx)) { ctx.reply('⭐ You have VIP access!', { reply_markup: vipMenu }); } else { ctx.reply('❌ Not VIP yet. Tap below to upgrade.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); } });
+bot.command('addvip', (ctx) => { const args = Number(ctx.match.trim()); if (!args) return ctx.reply('Usage: /addvip <user_id>'); addVip(args); ctx.reply('✅ User ' + args + ' added to VIP for 30 days!'); });
+bot.command('removevip', (ctx) => { const args = Number(ctx.match.trim()); if (!args) return ctx.reply('Usage: /removevip <user_id>'); removeVip(args); ctx.reply('❌ User ' + args + ' removed from VIP.'); });
+bot.command('myvip', (ctx) => { const id = ctx.from.id; if (LIFETIME_VIPS.has(id)) return ctx.reply('👑 You have Lifetime VIP access!', { reply_markup: vipMenu }); if (isVip(ctx)) { const days = Math.floor((VIP_USERS[id].expires - Date.now()) / (1000 * 60 * 60 * 24)); ctx.reply('⭐ VIP active — '+days+' days remaining.', { reply_markup: vipMenu }); } else { ctx.reply('❌ Not VIP yet.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); } });
 bot.callbackQuery('menu', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('📲 Main Menu:', { reply_markup: mainMenu }); });
-bot.callbackQuery('support', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('🆘 Need help? Contact us directly:\n\n👤 @Ch4to8\n\nWe typically respond within a few hours.', { reply_markup: new InlineKeyboard().url('💬 Message Support', 'https://t.me/Ch4to8').row().text('⬅️ Menu', 'menu') }); });
-bot.callbackQuery('vip', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('⭐ VIP Access\n\n📦 What you get:\n🔍 Contract risk analyzer\n🐋 Whale movement tracker\n⚡ Early gem alerts\n🎯 Daily buy/sell signals\n💎 Legit memecoin picks\n\n💵 Price: $9.99/month\n\n💳 Pay with:\n\n₿ BTC:\nbc1q4lpvdz77uj70lg6ph03k05h9pk0c597f9a6f5j\n\n◎ SOL:\nAXdnDpaoHY57HjkYNcrV8fimZZN4e3KRdoBJ92B7vSdn\n\n✅ After paying:\n1. Send payment screenshot to @Ch4to8\n2. Send your Telegram user ID (get it from @userinfobot)\n3. We activate you within 1 hour', { reply_markup: new InlineKeyboard().url('💬 Pay & Contact', 'https://t.me/Ch4to8').row().text('⬅️ Menu', 'menu') }); });
+bot.callbackQuery('support', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('🆘 Need help?\n\n👤 @Ch4to8\n\nWe respond within a few hours.', { reply_markup: new InlineKeyboard().url('💬 Message Support', 'https://t.me/Ch4to8').row().text('⬅️ Menu', 'menu') }); });
+bot.callbackQuery('vip', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('⭐ VIP Access\n\n📦 What you get:\n🔍 Contract risk analyzer\n🐋 Whale movement tracker\n⚡ Early gem alerts\n🎯 Daily buy/sell signals\n💎 Legit memecoin picks\n\n💵 Price: $9.99/month\n\n💳 Pay with:\n\n₿ BTC:\nbc1q4lpvdz77uj70lg6ph03k05h9pk0c597f9a6f5j\n\n◎ SOL:\nAXdnDpaoHY57HjkYNcrV8fimZZN4e3KRdoBJ92B7vSdn\n\n✅ After paying:\n1. Send screenshot to @Ch4to8\n2. Send your Telegram user ID (from @userinfobot)\n3. Activated within 1 hour', { reply_markup: new InlineKeyboard().url('💬 Pay & Contact', 'https://t.me/Ch4to8').row().text('⬅️ Menu', 'menu') }); });
 bot.callbackQuery('trending', async (ctx) => { await ctx.answerCallbackQuery(); const res = await fetch('https://api.coingecko.com/api/v3/search/trending'); const data = await res.json(); const list = data.coins.slice(0, 7).map((c, i) => (i+1)+'. '+c.item.name+' ('+c.item.symbol.toUpperCase()+')').join('\n'); ctx.reply('🔥 Trending:\n\n' + list, { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.callbackQuery('gainers', async (ctx) => { await ctx.answerCallbackQuery(); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=10&page=1&price_change_percentage=24h'); const data = await res.json(); const list = data.sort((a,b)=>b.price_change_percentage_24h-a.price_change_percentage_24h).slice(0,5).map((c,i)=>(i+1)+'. '+c.name+' +'+c.price_change_percentage_24h.toFixed(2)+'%').join('\n'); ctx.reply('📈 Top Gainers:\n\n'+list, { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.callbackQuery('losers', async (ctx) => { await ctx.answerCallbackQuery(); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=10&page=1&price_change_percentage=24h'); const data = await res.json(); const list = data.sort((a,b)=>a.price_change_percentage_24h-b.price_change_percentage_24h).slice(0,5).map((c,i)=>(i+1)+'. '+c.name+' '+c.price_change_percentage_24h.toFixed(2)+'%').join('\n'); ctx.reply('📉 Top Losers:\n\n'+list, { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.callbackQuery('volume', async (ctx) => { await ctx.answerCallbackQuery(); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=5&page=1'); const data = await res.json(); const list = data.map((c,i)=>(i+1)+'. '+c.name+' $'+Number(c.total_volume).toLocaleString()).join('\n'); ctx.reply('💹 Highest Volume:\n\n'+list, { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.callbackQuery('memecoins', async (ctx) => { await ctx.answerCallbackQuery(); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=meme-token&order=market_cap_desc&per_page=7&page=1&price_change_percentage=24h'); const data = await res.json(); const list = data.map((c,i)=>(i+1)+'. '+c.name+' ('+c.symbol.toUpperCase()+')\n   $'+c.current_price.toLocaleString()+' | '+c.price_change_percentage_24h.toFixed(2)+'% | Cap: $'+Number(c.market_cap).toLocaleString()).join('\n\n'); ctx.reply('🐸 Trending Memecoins:\n\n'+list, { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
-bot.callbackQuery('legit_memes', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=meme-token&order=volume_desc&per_page=5&page=1'); const data = await res.json(); const list = data.map((c,i)=>(i+1)+'. '+c.name+' ('+c.symbol.toUpperCase()+')\n   Price: $'+c.current_price.toLocaleString()+'\n   Volume: $'+Number(c.total_volume).toLocaleString()+'\n   24h: '+c.price_change_percentage_24h.toFixed(2)+'%').join('\n\n'); ctx.reply('💎 Legit Memecoins (High Volume):\n\n'+list+'\n\n✅ These have real volume and market cap behind them.', { reply_markup: vipMenu }); });
+bot.callbackQuery('legit_memes', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=meme-token&order=volume_desc&per_page=5&page=1'); const data = await res.json(); const list = data.map((c,i)=>(i+1)+'. '+c.name+' ('+c.symbol.toUpperCase()+')\n   Price: $'+c.current_price.toLocaleString()+'\n   Volume: $'+Number(c.total_volume).toLocaleString()+'\n   24h: '+c.price_change_percentage_24h.toFixed(2)+'%').join('\n\n'); ctx.reply('💎 Legit Memecoins:\n\n'+list+'\n\n✅ Real volume and market cap.', { reply_markup: vipMenu }); });
 bot.callbackQuery('price_prompt', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('💰 Type: /price bitcoin'); });
 bot.callbackQuery('stats_prompt', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('📋 Type: /stats bitcoin'); });
 bot.callbackQuery('learn', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('🧠 Crypto Basics:\n\n1. Bitcoin — the first cryptocurrency\n2. Altcoins — any coin that is not Bitcoin\n3. Wallet — where you store your crypto\n4. Exchange — where you buy and sell\n5. Private key — never share this', { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
@@ -47,11 +67,10 @@ bot.callbackQuery('safe', async (ctx) => { await ctx.answerCallbackQuery(); ctx.
 bot.callbackQuery('terms', async (ctx) => { await ctx.answerCallbackQuery(); ctx.reply('📖 Terms:\n\nRug pull — devs take funds\nLiquidity — how easily a coin trades\nWhale — huge holder\nFUD — Fear Uncertainty Doubt\nFOMO — Fear Of Missing Out\nHODL — holding long term', { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.callbackQuery('check_prompt', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); ctx.reply('🔍 Send: /check <contract address>'); });
 bot.callbackQuery('whales', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=5&page=1'); const data = await res.json(); const list = data.map((c,i)=>(i+1)+'. '+c.name+' — $'+Number(c.total_volume).toLocaleString()+' volume').join('\n'); ctx.reply('🐋 Whale Activity:\n\n'+list, { reply_markup: vipMenu }); });
-bot.callbackQuery('early', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const res = await fetch('https://api.coingecko.com/api/v3/search/trending'); const data = await res.json(); const list = data.coins.slice(0, 5).map((c,i)=>(i+1)+'. '+c.item.name+' ('+c.item.symbol.toUpperCase()+') — Rank #'+c.item.market_cap_rank).join('\n'); ctx.reply('⚡ Early Gems:\n\n'+list+'\n\n💡 Trending before the crowd catches on.', { reply_markup: vipMenu }); });
+bot.callbackQuery('early', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const res = await fetch('https://api.coingecko.com/api/v3/search/trending'); const data = await res.json(); const list = data.coins.slice(0, 5).map((c,i)=>(i+1)+'. '+c.item.name+' ('+c.item.symbol.toUpperCase()+') — Rank #'+c.item.market_cap_rank).join('\n'); ctx.reply('⚡ Early Gems:\n\n'+list+'\n\n💡 Trending before the crowd.', { reply_markup: vipMenu }); });
 bot.callbackQuery('signal', async (ctx) => { await ctx.answerCallbackQuery(); if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=10&page=1&price_change_percentage=24h'); const data = await res.json(); const top = data.sort((a,b)=>b.price_change_percentage_24h-a.price_change_percentage_24h)[0]; const bottom = [...data].sort((a,b)=>a.price_change_percentage_24h-b.price_change_percentage_24h)[0]; ctx.reply('🎯 Daily Signal:\n\n📈 WATCH: '+top.name+' (+'+top.price_change_percentage_24h.toFixed(2)+'%)\nPrice: $'+top.current_price.toLocaleString()+'\n\n📉 AVOID: '+bottom.name+' ('+bottom.price_change_percentage_24h.toFixed(2)+'%)\nPrice: $'+bottom.current_price.toLocaleString()+'\n\n⚠️ Not financial advice. DYOR.', { reply_markup: vipMenu }); });
 bot.command('check', async (ctx) => { if (!isVip(ctx)) return ctx.reply('⭐ VIP only.', { reply_markup: new InlineKeyboard().text('⭐ Get VIP', 'vip') }); const contract = ctx.match.trim(); if (!contract) return ctx.reply('Usage: /check <contract address>'); ctx.reply('🔍 Analyzing: '+contract+'\n\n✅ Format: Valid\n⚠️ Always verify on Etherscan/Solscan.\n\nhttps://etherscan.io/token/'+contract, { reply_markup: vipMenu }); });
 bot.command('price', async (ctx) => { const symbol = ctx.match.trim().toLowerCase(); if (!symbol) return ctx.reply('Usage: /price bitcoin'); const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids='+symbol+'&vs_currencies=usd'); const data = await res.json(); if (!data[symbol]) return ctx.reply('Coin not found. Try /price bitcoin'); ctx.reply('💰 '+symbol.toUpperCase()+': $'+data[symbol].usd.toLocaleString(), { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.command('stats', async (ctx) => { const symbol = ctx.match.trim().toLowerCase(); if (!symbol) return ctx.reply('Usage: /stats bitcoin'); const res = await fetch('https://api.coingecko.com/api/v3/coins/'+symbol); const data = await res.json(); if (!data.market_data) return ctx.reply('Coin not found. Try /stats bitcoin'); const m = data.market_data; ctx.reply('📊 '+data.name+':\n\nPrice: $'+m.current_price.usd.toLocaleString()+'\nMarket Cap: $'+m.market_cap.usd.toLocaleString()+'\n24h Change: '+m.price_change_percentage_24h.toFixed(2)+'%\nVolume: $'+m.total_volume.usd.toLocaleString(), { reply_markup: new InlineKeyboard().text('⬅️ Menu', 'menu') }); });
 bot.start();
 console.log('🤖 VIP Bot is running...');
-
